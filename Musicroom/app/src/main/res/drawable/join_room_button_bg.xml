@@ -1,0 +1,10 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+
+    <!-- Boja pozadine dugmeta -->
+    <solid android:color="#67C535" />
+
+    <!-- Zaobljeni uglovi sa manjim radiusom -->
+    <corners android:radius="8dp" />
+
+</shape>
