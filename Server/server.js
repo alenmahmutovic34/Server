@@ -44,9 +44,9 @@ app.post('/joinRoom', async (req, res) => {
     }
 
     try {
-        // Uzimamo i `room_name` iz baze
+        // Uzimamo `room_name`, `max_users` i `number_users` iz baze
         const [rows] = await connection.execute(
-            'SELECT username, room_name FROM rooms WHERE room_code = ?',
+            'SELECT username, room_name, max_users, number_users FROM rooms WHERE room_code = ?',
             [roomCode]
         );
 
@@ -55,7 +55,20 @@ app.post('/joinRoom', async (req, res) => {
         }
 
         const roomCreator = rows[0].username;
-        const roomName = rows[0].room_name; // Dodali smo ovo
+        const roomName = rows[0].room_name;
+        const maxUsers = rows[0].max_users;
+        const numberUsers = rows[0].number_users;
+
+        // Provera da li je soba puna
+        if (numberUsers >= maxUsers) {
+            return res.status(400).json({ error: 'Soba je puna!' });
+        }
+
+        // Povećaj broj korisnika u sobi
+        await connection.execute(
+            'UPDATE rooms SET number_users = number_users + 1 WHERE room_code = ?',
+            [roomCode]
+        );
 
         console.log(`📢 Server šalje: roomName = ${roomName}, roomCode = ${roomCode}`);
 
@@ -63,8 +76,8 @@ app.post('/joinRoom', async (req, res) => {
 
         res.status(200).json({
             message: 'Uspešno ste se pridružili sobi!',
-            isCreator: isCreator, // Da li je kreator?
-            roomName: roomName || "Nepoznato" // Ako `room_name` nije postavljen, šaljemo "Nepoznato"
+            isCreator: isCreator,
+            roomName: roomName || "Nepoznato"
         });
 
     } catch (error) {
@@ -243,8 +256,9 @@ app.post('/createRoom', async (req, res) => {
   }
 
   try {
+    // Dodaj sobu u bazu sa početnim brojem korisnika 1 (jer kreator ulazi u sobu)
     await connection.execute(
-      'INSERT INTO rooms (room_name, max_users, room_code, username) VALUES (?, ?, ?, ?)',
+      'INSERT INTO rooms (room_name, max_users, room_code, username, number_users) VALUES (?, ?, ?, ?, 1)',
       [room_name, max_users, room_code, username]
     );
 
@@ -416,11 +430,39 @@ wss.on('connection', (ws) => {
 
                 break;
             }
+
+            case 'leaveRoom': {
+                const { roomCode } = data;
+
+                // Smanji broj korisnika u sobi
+                connection.execute(
+                    'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
+                    [roomCode]
+                ).then(() => {
+                    console.log(`👤 Korisnik napustio sobu: ${roomCode}`);
+                }).catch((error) => {
+                    console.error('❌ Greška pri smanjivanju broja korisnika:', error);
+                });
+
+                break;
+            }
         }
     });
 
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
+
+        if (ws.roomCode) {
+            // Smanji broj korisnika u sobi kada korisnik napusti
+            connection.execute(
+                'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
+                [ws.roomCode]
+            ).then(() => {
+                console.log(`👤 Korisnik napustio sobu: ${ws.roomCode}`);
+            }).catch((error) => {
+                console.error('❌ Greška pri smanjivanju broja korisnika:', error);
+            });
+        }
     });
 });
 
