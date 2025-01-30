@@ -47,9 +47,9 @@ app.post('/joinRoom', async (req, res) => {
     }
 
     try {
-        // Fetch the room details from the database
+        // Uzimamo i `room_name` iz baze
         const [rows] = await connection.execute(
-            'SELECT username, room_name, max_users FROM rooms WHERE room_code = ?',
+            'SELECT username, room_name FROM rooms WHERE room_code = ?',
             [roomCode]
         );
 
@@ -58,35 +58,16 @@ app.post('/joinRoom', async (req, res) => {
         }
 
         const roomCreator = rows[0].username;
-        const roomName = rows[0].room_name;
-        const maxUsers = rows[0].max_users;
-
-        // Get the current number of users in the room
-        const [userCountRows] = await connection.execute(
-            'SELECT COUNT(*) as userCount FROM room_users WHERE room_code = ?',
-            [roomCode]
-        );
-
-        const currentUserCount = userCountRows[0].userCount;
-
-        if (currentUserCount >= maxUsers) {
-            return res.status(403).json({ error: 'Soba je puna!' });
-        }
+        const roomName = rows[0].room_name; // Dodali smo ovo
 
         console.log(`📢 Server šalje: roomName = ${roomName}, roomCode = ${roomCode}`);
 
         const isCreator = username === roomCreator;
 
-        // Insert the user into the room (assuming there's a `room_users` table)
-        await connection.execute(
-            'INSERT INTO room_users (room_code, username) VALUES (?, ?)',
-            [roomCode, username]
-        );
-
         res.status(200).json({
             message: 'Uspešno ste se pridružili sobi!',
-            isCreator: isCreator,
-            roomName: roomName || "Nepoznato"
+            isCreator: isCreator, // Da li je kreator?
+            roomName: roomName || "Nepoznato" // Ako `room_name` nije postavljen, šaljemo "Nepoznato"
         });
 
     } catch (error) {
