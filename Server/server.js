@@ -16,6 +16,7 @@ const PORT = 8080;
 
 // Čuvamo liste pesama u memoriji servera
 const rooms = {};
+const roomUsers = {};
 
 
 // Povezivanje na MySQL bazu
@@ -47,9 +48,9 @@ app.post('/joinRoom', async (req, res) => {
     }
 
     try {
-        // Uzimamo i `room_name` iz baze
+        // Uzimamo room_name i max_users iz baze
         const [rows] = await connection.execute(
-            'SELECT username, room_name FROM rooms WHERE room_code = ?',
+            'SELECT username, room_name, max_users FROM rooms WHERE room_code = ?',
             [roomCode]
         );
 
@@ -58,16 +59,39 @@ app.post('/joinRoom', async (req, res) => {
         }
 
         const roomCreator = rows[0].username;
-        const roomName = rows[0].room_name; // Dodali smo ovo
+        const roomName = rows[0].room_name;
+        const maxUsers = rows[0].max_users;
 
-        console.log(`📢 Server šalje: roomName = ${roomName}, roomCode = ${roomCode}`);
+        // Inicijalizuj brojač korisnika ako ne postoji
+        if (!roomUsers[roomCode]) {
+            roomUsers[roomCode] = new Set();
+        }
 
-        const isCreator = username === roomCreator;
+        // Proveri da li je korisnik već u sobi
+        if (roomUsers[roomCode].has(username)) {
+            return res.status(200).json({
+                message: 'Već ste u sobi!',
+                isCreator: username === roomCreator,
+                roomName: roomName
+            });
+        }
+
+        // Proveri limit korisnika
+        if (roomUsers[roomCode].size >= maxUsers) {
+            return res.status(403).json({ 
+                error: `Soba je puna! Maksimalan broj korisnika je ${maxUsers}.` 
+            });
+        }
+
+        // Dodaj korisnika u sobu
+        roomUsers[roomCode].add(username);
+
+        console.log(`📢 Server šalje: roomName = ${roomName}, roomCode = ${roomCode}, trenutno korisnika: ${roomUsers[roomCode].size}/${maxUsers}`);
 
         res.status(200).json({
             message: 'Uspešno ste se pridružili sobi!',
-            isCreator: isCreator, // Da li je kreator?
-            roomName: roomName || "Nepoznato" // Ako `room_name` nije postavljen, šaljemo "Nepoznato"
+            isCreator: username === roomCreator,
+            roomName: roomName || "Nepoznato"
         });
 
     } catch (error) {
@@ -273,29 +297,26 @@ wss.on('connection', (ws) => {
 
     ws.on('message', (message) => {
         console.log('📩 SERVER PRIMIO PORUKU:', message);
-
         const data = JSON.parse(message);
 
         switch (data.type) {
             case 'joinRoom': {
-                const { roomCode } = data;
+                const { roomCode, username } = data;
 
                 if (!rooms[roomCode]) {
-                    rooms[roomCode] = new Map(); // Koristimo Map za lakše praćenje jedinstvenih pjesama
+                    rooms[roomCode] = new Map();
                 }
 
                 ws.roomCode = roomCode;
+                ws.username = username;
 
-                console.log(`👤 Novi korisnik se pridružio sobi: ${roomCode}`);
+                console.log(`👤 Korisnik ${username} se pridružio sobi: ${roomCode}`);
 
-                // Konvertuj Map u Array za slanje
                 const songsArray = Array.from(rooms[roomCode].values());
-
                 ws.send(JSON.stringify({
                     type: 'roomJoined',
                     songs: songsArray,
                 }));
-
                 break;
             }
 
@@ -306,30 +327,22 @@ wss.on('connection', (ws) => {
                     rooms[roomCode] = new Map();
                 }
 
-                // Kreiraj jedinstveni ključ za pjesmu
                 const songKey = `${song.title}-${song.artist}`;
 
                 if (rooms[roomCode].has(songKey)) {
-                    // Ako pjesma već postoji, povećaj broj glasova
                     const existingSong = rooms[roomCode].get(songKey);
                     existingSong.votes = (existingSong.votes || 1) + 1;
-                    
-                    // Premjesti pjesmu na početak liste
                     rooms[roomCode].delete(songKey);
                     rooms[roomCode].set(songKey, existingSong);
-                    
                     console.log(`🎵 Dodan novi glas za pjesmu: "${song.title}" u sobi: ${roomCode}`);
                 } else {
-                    // Ako je nova pjesma, dodaj je sa jednim glasom
                     song.votes = 1;
                     rooms[roomCode].set(songKey, song);
                     console.log(`🎵 Dodana nova pjesma: "${song.title}" u sobi: ${roomCode}`);
                 }
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Pošalji svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({ 
@@ -338,7 +351,6 @@ wss.on('connection', (ws) => {
                         }));
                     }
                 });
-
                 break;
             }
 
@@ -347,19 +359,15 @@ wss.on('connection', (ws) => {
 
                 if (!rooms[roomCode]) return;
 
-                // Kreiraj jedinstveni ključ za pesmu
                 const songKey = `${song.title}-${song.artist}`;
 
-                // Ukloni pesmu iz sobe
                 if (rooms[roomCode].has(songKey)) {
                     rooms[roomCode].delete(songKey);
                     console.log(`🎵 Pesma "${song.title}" je uklonjena iz sobe: ${roomCode}`);
                 }
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Pošaljite svim korisnicima u sobi ažuriranu listu pesama
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -368,7 +376,6 @@ wss.on('connection', (ws) => {
                         }));
                     }
                 });
-
                 break;
             }
 
@@ -379,16 +386,13 @@ wss.on('connection', (ws) => {
 
                 if (!rooms[roomCode]) return;
 
-                // Ukloni pjesmu iz Map-e
                 const songKey = `${song.title}-${song.artist}`;
                 rooms[roomCode].delete(songKey);
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
                 console.log(`🗑️ Šaljem updateQueue svim klijentima u sobi: ${roomCode}`);
 
-                // Pošaljite svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -397,16 +401,25 @@ wss.on('connection', (ws) => {
                         }));
                     }
                 });
-
                 break;
             }
         }
     });
-
    
   ws.on('close', () => {
-    console.log('🚪 Klijent se isključio');
-  });
+        if (ws.roomCode && ws.username) {
+            if (roomUsers[ws.roomCode]) {
+                roomUsers[ws.roomCode].delete(ws.username);
+                
+                if (roomUsers[ws.roomCode].size === 0) {
+                    delete roomUsers[ws.roomCode];
+                    delete rooms[ws.roomCode];
+                }
+            }
+            console.log(`🚪 Korisnik ${ws.username} je napustio sobu ${ws.roomCode}`);
+        }
+        console.log('🚪 Klijent se isključio');
+    });
 });
 
 // Pokreni server
