@@ -10,13 +10,10 @@ app.use(bodyParser.json());
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-
-
 const PORT = 8080;
 
 // Čuvamo liste pesama u memoriji servera
 const rooms = {};
-
 
 // Povezivanje na MySQL bazu
 const dbConfig = {
@@ -75,9 +72,6 @@ app.post('/joinRoom', async (req, res) => {
         res.status(500).json({ error: 'Greška sa bazom podataka.' });
     }
 });
-
-
-
 
 // Endpoint za zaboravljenu lozinku
 app.post('/forgotPassword', async (req, res) => {
@@ -157,7 +151,6 @@ async function sendEmail(recipientEmail, subject, message) {
     text: message,
   });
 }
-
 
 // Endpoint za promenu lozinke
 app.post('/changePassword', async (req, res) => {
@@ -268,6 +261,7 @@ app.post('/createRoom', async (req, res) => {
     res.status(500).json({ error: 'Greška sa bazom podataka.' });
   }
 });
+
 wss.on('connection', (ws) => {
     console.log('🎧 Novi klijent povezan');
 
@@ -395,6 +389,28 @@ wss.on('connection', (ws) => {
                             type: 'updateQueue',
                             songs: updatedSongs
                         }));
+
+                        // Pošalji informaciju o trenutno puštenoj pjesmi
+                        client.send(JSON.stringify({
+                            type: 'currentlyPlaying',
+                            song: song
+                        }));
+                    }
+                });
+
+                break;
+            }
+
+            case 'stopSong': {
+                const { roomCode } = data;
+
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                        // Pošalji poruku da nema trenutno puštene pjesme
+                        client.send(JSON.stringify({
+                            type: 'currentlyPlaying',
+                            song: null
+                        }));
                     }
                 });
 
@@ -403,17 +419,12 @@ wss.on('connection', (ws) => {
         }
     });
 
-   
-  ws.on('close', () => {
-    console.log('🚪 Klijent se isključio');
-  });
+    ws.on('close', () => {
+        console.log('🚪 Klijent se isključio');
+    });
 });
 
 // Pokreni server
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server pokrenut na ws://0.0.0.0:${PORT}`);
 });
-
-
-
-
