@@ -422,11 +422,7 @@ wss.on('connection', (ws) => {
         }
     });
 
-    ws.on('close', () => {
-        console.log('🚪 Klijent se isključio');
-    });
-});
-
+   
   ws.on('close', () => {
     console.log('🚪 Klijent se isključio');
   });
