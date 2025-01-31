@@ -422,23 +422,27 @@ wss.on('connection', (ws) => {
             case 'leaveRoom': {
                 const { roomCode, username } = data;
                 
-                if (usersInRooms[roomCode]) {
-                    usersInRooms[roomCode].delete(username);
-                    
-                    if (usersInRooms[roomCode].size === 0) {
-                        delete usersInRooms[roomCode];
-                        delete rooms[roomCode];
-                    } else {
-                        wss.clients.forEach((client) => {
-                            if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                                client.send(JSON.stringify({
-                                    type: 'updateUsers',
-                                    users: Array.from(usersInRooms[roomCode])
-                                }));
-                            }
-                        });
-                    }
-                }
+               if (usersInRooms[roomCode]) {
+    if (username && usersInRooms[roomCode].has(username)) {
+        usersInRooms[roomCode].delete(username);
+    }
+
+    if (usersInRooms[roomCode].size === 0) {
+        delete usersInRooms[roomCode];
+        delete rooms[roomCode];
+    } else {
+        wss.clients.forEach((client) => {
+            if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                client.send(JSON.stringify({
+                    type: 'updateUsers',
+                    users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "null")
+                }));
+            }
+        });
+    }
+}
+
+
 
                 connection.execute(
                     'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
