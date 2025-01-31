@@ -88,6 +88,118 @@ app.post('/joinRoom', async (req, res) => {
     }
 });
 
+// Endpoint za zaboravljenu lozinku
+app.post('/forgotPassword', async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email je obavezan!' });
+  }
+
+  try {
+    // Proveri da li postoji korisnik sa ovim emailom
+    const [rows] = await connection.execute(
+      'SELECT username FROM users WHERE email = ?',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Email nije pronađen u sistemu!' });
+    }
+
+    const username = rows[0].username;
+
+    // Generiši novu lozinku
+    const newPassword = generateRandomPassword();
+
+    // Ažuriraj lozinku u bazi
+    await connection.execute(
+      'UPDATE users SET password = ? WHERE email = ?',
+      [newPassword, email]
+    );
+
+    // Pošalji email sa novom lozinkom
+    try {
+      await sendEmail(
+        email,
+        'Resetovanje lozinke za MusicRoom nalog',
+        `Poštovani ${username},\n\nVaša nova lozinka je: ${newPassword}\n\nMolimo vas da je promenite nakon prijave.\n\nPozdrav,\nMusicRoom tim`
+      );
+      console.log(`Nova lozinka poslana na ${email}`);
+      res.status(200).json({ message: 'Nova lozinka poslana na vaš email!' });
+    } catch (error) {
+      console.error('Greška pri slanju emaila:', error);
+      res.status(500).json({ error: 'Greška pri slanju emaila.' });
+    }
+  } catch (error) {
+    console.error('Greška pri resetovanju lozinke:', error);
+    res.status(500).json({ error: 'Greška sa bazom podataka.' });
+  }
+});
+
+// Funkcija za generisanje nasumične lozinke
+function generateRandomPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 8; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+// Funkcija za slanje emaila
+async function sendEmail(recipientEmail, subject, message) {
+  const nodemailer = require('nodemailer');
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: 'alenmahmutovic2@gmail.com', // Tvoj email
+      pass: 'zsvy weot zaek ayzw', // App Password za tvoj email
+    },
+  });
+
+  await transporter.sendMail({
+    from: 'alenmahmutovic2@gmail.com',
+    to: recipientEmail,
+    subject: subject,
+    text: message,
+  });
+}
+
+// Endpoint za promenu lozinke
+app.post('/changePassword', async (req, res) => {
+  const { username, oldPassword, newPassword } = req.body;
+
+  if (!username || !oldPassword || !newPassword) {
+    return res.status(400).json({ error: 'Sva polja su obavezna!' });
+  }
+
+  try {
+    // Proveri da li korisnik postoji sa starom lozinkom
+    const [rows] = await connection.execute(
+      'SELECT * FROM users WHERE username = ? AND password = ?',
+      [username, oldPassword]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Pogrešno korisničko ime ili lozinka!' });
+    }
+
+    // Ažuriraj lozinku
+    await connection.execute(
+      'UPDATE users SET password = ? WHERE username = ?',
+      [newPassword, username]
+    );
+
+    console.log(`Lozinka uspešno promenjena za korisnika: ${username}`);
+    res.status(200).json({ message: 'Lozinka uspešno promenjena!' });
+  } catch (error) {
+    console.error('Greška pri promeni lozinke:', error);
+    res.status(500).json({ error: 'Greška sa bazom podataka.' });
+  }
+});
+
 app.post('/register', async (req, res) => {
     const { username, password, email } = req.body;
 
@@ -203,9 +315,10 @@ wss.on('connection', (ws) => {
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
-                            type: 'updateUsers',
-                            users: Array.from(usersInRooms[roomCode])
-                        }));
+							type: 'updateUsers',
+							users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "None")
+}));
+
                     }
                 });
                 break;
