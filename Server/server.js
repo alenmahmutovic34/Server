@@ -287,40 +287,23 @@ wss.on('connection', (ws) => {
 
         switch (data.type) {
             case 'joinRoom': {
-                const { roomCode, username } = data;
+                const { roomCode } = data;
 
                 if (!rooms[roomCode]) {
-                    rooms[roomCode] = {
-                        songs: new Map(),
-                        users: [] // Initialize user list for the room
-                    };
+                    rooms[roomCode] = new Map(); // Koristimo Map za lakše praćenje jedinstvenih pjesama
                 }
 
                 ws.roomCode = roomCode;
-                ws.username = username;
 
-                // Add the user to the room's user list
-                rooms[roomCode].users.push(username);
-                console.log(`👤 Novi korisnik se pridružio sobi: ${roomCode}, Korisničko ime: ${username}`);
+                console.log(`👤 Novi korisnik se pridružio sobi: ${roomCode}`);
 
-                // Send the list of users and songs to the new user
-                const songsArray = Array.from(rooms[roomCode].songs.values());
+                // Konvertuj Map u Array za slanje
+                const songsArray = Array.from(rooms[roomCode].values());
+
                 ws.send(JSON.stringify({
                     type: 'roomJoined',
                     songs: songsArray,
-                    users: rooms[roomCode].users // Send current list of users
                 }));
-
-                // Broadcast updated user list to all other users in the room
-                const updatedUserList = rooms[roomCode].users;
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        client.send(JSON.stringify({
-                            type: 'updateUserList',
-                            users: updatedUserList
-                        }));
-                    }
-                });
 
                 break;
             }
@@ -329,36 +312,36 @@ wss.on('connection', (ws) => {
                 const { roomCode, song } = data;
 
                 if (!rooms[roomCode]) {
-                    rooms[roomCode] = { songs: new Map(), users: [] };
+                    rooms[roomCode] = new Map();
                 }
 
-                // Create a unique key for the song
+                // Kreiraj jedinstveni ključ za pjesmu
                 const songKey = `${song.title}-${song.artist}`;
 
-                if (rooms[roomCode].songs.has(songKey)) {
-                    // If the song already exists, increase its vote count
-                    const existingSong = rooms[roomCode].songs.get(songKey);
+                if (rooms[roomCode].has(songKey)) {
+                    // Ako pjesma već postoji, povećaj broj glasova
+                    const existingSong = rooms[roomCode].get(songKey);
                     existingSong.votes = (existingSong.votes || 1) + 1;
-
-                    // Move the song to the start of the list
-                    rooms[roomCode].songs.delete(songKey);
-                    rooms[roomCode].songs.set(songKey, existingSong);
-
+                    
+                    // Premjesti pjesmu na početak liste
+                    rooms[roomCode].delete(songKey);
+                    rooms[roomCode].set(songKey, existingSong);
+                    
                     console.log(`🎵 Dodan novi glas za pjesmu: "${song.title}" u sobi: ${roomCode}`);
                 } else {
-                    // If it's a new song, add it with one vote
+                    // Ako je nova pjesma, dodaj je sa jednim glasom
                     song.votes = 1;
-                    rooms[roomCode].songs.set(songKey, song);
+                    rooms[roomCode].set(songKey, song);
                     console.log(`🎵 Dodana nova pjesma: "${song.title}" u sobi: ${roomCode}`);
                 }
 
-                // Convert the Map to an Array for sending
-                const updatedSongs = Array.from(rooms[roomCode].songs.values());
+                // Konvertuj Map u Array za slanje
+                const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Send the updated queue to all users in the room
+                // Pošalji svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        client.send(JSON.stringify({
+                        client.send(JSON.stringify({ 
                             type: 'updateQueue',
                             songs: updatedSongs
                         }));
@@ -373,19 +356,19 @@ wss.on('connection', (ws) => {
 
                 if (!rooms[roomCode]) return;
 
-                // Create a unique key for the song
+                // Kreiraj jedinstveni ključ za pesmu
                 const songKey = `${song.title}-${song.artist}`;
 
-                // Remove the song from the room
-                if (rooms[roomCode].songs.has(songKey)) {
-                    rooms[roomCode].songs.delete(songKey);
+                // Ukloni pesmu iz sobe
+                if (rooms[roomCode].has(songKey)) {
+                    rooms[roomCode].delete(songKey);
                     console.log(`🎵 Pesma "${song.title}" je uklonjena iz sobe: ${roomCode}`);
                 }
 
-                // Convert the Map to an Array for sending
-                const updatedSongs = Array.from(rooms[roomCode].songs.values());
+                // Konvertuj Map u Array za slanje
+                const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Send the updated queue to all users in the room
+                // Pošaljite svim korisnicima u sobi ažuriranu listu pesama
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -405,16 +388,16 @@ wss.on('connection', (ws) => {
 
                 if (!rooms[roomCode]) return;
 
-                // Remove the song from the Map
+                // Ukloni pjesmu iz Map-e
                 const songKey = `${song.title}-${song.artist}`;
-                rooms[roomCode].songs.delete(songKey);
+                rooms[roomCode].delete(songKey);
 
-                // Convert the Map to an Array for sending
-                const updatedSongs = Array.from(rooms[roomCode].songs.values());
+                // Konvertuj Map u Array za slanje
+                const updatedSongs = Array.from(rooms[roomCode].values());
 
                 console.log(`🗑️ Šaljem updateQueue svim klijentima u sobi: ${roomCode}`);
 
-                // Send the updated queue to all users in the room
+                // Pošaljite svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -422,7 +405,7 @@ wss.on('connection', (ws) => {
                             songs: updatedSongs
                         }));
 
-                        // Send information about the currently playing song
+                        // Pošalji informaciju o trenutno puštenoj pjesmi
                         client.send(JSON.stringify({
                             type: 'currentlyPlaying',
                             song: song
@@ -438,7 +421,7 @@ wss.on('connection', (ws) => {
 
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        // Send a message that no song is currently playing
+                        // Pošalji poruku da nema trenutno puštene pjesme
                         client.send(JSON.stringify({
                             type: 'currentlyPlaying',
                             song: null
@@ -450,33 +433,22 @@ wss.on('connection', (ws) => {
             }
 
             case 'leaveRoom': {
-                const { roomCode, username } = data;
+                const { roomCode } = data;
 
-                // Remove user from room's user list
-                const userIndex = rooms[roomCode].users.indexOf(username);
-                if (userIndex !== -1) {
-                    rooms[roomCode].users.splice(userIndex, 1);
-                }
-
-                // Broadcast updated user list to all other users in the room
-                const updatedUserList = rooms[roomCode].users;
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        client.send(JSON.stringify({
-                            type: 'updateUserList',
-                            users: updatedUserList
-                        }));
-                    }
+                // Smanji broj korisnika u sobi
+                connection.execute(
+                    'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
+                    [roomCode]
+                ).then(() => {
+                    console.log(`👤 Korisnik napustio sobu: ${roomCode}`);
+                }).catch((error) => {
+                    console.error('❌ Greška pri smanjivanju broja korisnika:', error);
                 });
-
-                console.log(`👤 Korisnik napustio sobu: ${roomCode}`);
 
                 break;
             }
         }
     });
-
-
 
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
