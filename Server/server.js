@@ -208,6 +208,16 @@ app.post('/register', async (req, res) => {
   }
 
   try {
+    // Proveri da li korisničko ime već postoji u bazi
+    const [existingUser] = await connection.execute(
+      'SELECT * FROM users WHERE username = ?',
+      [username]
+    );
+
+    if (existingUser.length > 0) {
+      return res.status(400).json({ error: 'Korisničko ime je već zauzeto!' });
+    }
+
     // Dodaj korisnika u tabelu `users`
     const [result] = await connection.execute(
       'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
@@ -221,6 +231,33 @@ app.post('/register', async (req, res) => {
     res.status(500).json({ error: 'Greška sa bazom podataka.' });
   }
 });
+
+app.post('/check-username', async (req, res) => {
+  const { username } = req.body;
+
+  if (!username) {
+    return res.status(400).json({ error: 'Korisničko ime je obavezno!' });
+  }
+
+  try {
+    // Proveri da li korisničko ime već postoji u bazi
+    const [existingUser] = await connection.execute(
+      'SELECT * FROM users WHERE username = ?',
+      [username]
+    );
+
+    if (existingUser.length > 0) {
+      return res.status(200).json({ isAvailable: false });
+    }
+
+    return res.status(200).json({ isAvailable: true });
+  } catch (error) {
+    console.error('Greška pri proveri korisničkog imena:', error);
+    return res.status(500).json({ error: 'Greška sa bazom podataka.' });
+  }
+});
+
+
 
 // Endpoint za prijavu korisnika
 app.post('/login', async (req, res) => {
