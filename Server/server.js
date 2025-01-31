@@ -420,17 +420,20 @@ wss.on('connection', (ws) => {
             }
 
             case 'leaveRoom': {
-                const { roomCode, username } = data;
-                
-               if (usersInRooms[roomCode]) {
-    if (username && usersInRooms[roomCode].has(username)) {
-        usersInRooms[roomCode].delete(username);
-    }
+    const { roomCode, username } = data;
 
-    if (usersInRooms[roomCode].size === 0) {
-        delete usersInRooms[roomCode];
-        delete rooms[roomCode];
-    } else {
+    if (usersInRooms[roomCode]) {
+        if (username && usersInRooms[roomCode].has(username)) {
+            usersInRooms[roomCode].delete(username);
+        }
+
+        // Ako je soba sada prazna, ukloni je iz memorije
+        if (usersInRooms[roomCode].size === 0) {
+            delete usersInRooms[roomCode];
+            delete rooms[roomCode];
+        }
+
+        // Pošalji svim korisnicima u sobi ažuriranu listu korisnika
         wss.clients.forEach((client) => {
             if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                 client.send(JSON.stringify({
@@ -439,22 +442,18 @@ wss.on('connection', (ws) => {
                 }));
             }
         });
+
+        // Smanji broj korisnika u bazi podataka
+        connection.execute(
+            'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
+            [roomCode]
+        ).catch((error) => {
+            console.error('❌ Greška pri smanjivanju broja korisnika:', error);
+        });
     }
+    break;
 }
 
-
-
-                connection.execute(
-                    'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
-                    [roomCode]
-                ).catch((error) => {
-                    console.error('❌ Greška pri smanjivanju broja korisnika:', error);
-                });
-                
-                break;
-            }
-        }
-    });
 
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
