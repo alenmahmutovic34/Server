@@ -12,7 +12,7 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = 8080;
 
-// Čuvamo liste pesama u memoriji servera
+// Čuvamo liste pesama i korisnika u memoriji servera
 const rooms = {};
 const usersInRooms = {};
 
@@ -45,7 +45,6 @@ app.post('/joinRoom', async (req, res) => {
     }
 
     try {
-        // Uzimamo `room_name`, `max_users` i `number_users` iz baze
         const [rows] = await connection.execute(
             'SELECT username, room_name, max_users, number_users FROM rooms WHERE room_code = ?',
             [roomCode]
@@ -60,18 +59,20 @@ app.post('/joinRoom', async (req, res) => {
         const maxUsers = rows[0].max_users;
         const numberUsers = rows[0].number_users;
 
-        // Provera da li je soba puna
         if (numberUsers >= maxUsers) {
             return res.status(400).json({ error: 'Soba je puna!' });
         }
 
-        // Povećaj broj korisnika u sobi
+        // Dodaj korisnika u listu korisnika sobe
+        if (!usersInRooms[roomCode]) {
+            usersInRooms[roomCode] = new Set();
+        }
+        usersInRooms[roomCode].add(username);
+
         await connection.execute(
             'UPDATE rooms SET number_users = number_users + 1 WHERE room_code = ?',
             [roomCode]
         );
-
-        console.log(`📢 Server šalje: roomName = ${roomName}, roomCode = ${roomCode}`);
 
         const isCreator = username === roomCreator;
 
@@ -87,231 +88,85 @@ app.post('/joinRoom', async (req, res) => {
     }
 });
 
-// Endpoint za zaboravljenu lozinku
-app.post('/forgotPassword', async (req, res) => {
-  const { email } = req.body;
-
-  if (!email) {
-    return res.status(400).json({ error: 'Email je obavezan!' });
-  }
-
-  try {
-    // Proveri da li postoji korisnik sa ovim emailom
-    const [rows] = await connection.execute(
-      'SELECT username FROM users WHERE email = ?',
-      [email]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Email nije pronađen u sistemu!' });
-    }
-
-    const username = rows[0].username;
-
-    // Generiši novu lozinku
-    const newPassword = generateRandomPassword();
-
-    // Ažuriraj lozinku u bazi
-    await connection.execute(
-      'UPDATE users SET password = ? WHERE email = ?',
-      [newPassword, email]
-    );
-
-    // Pošalji email sa novom lozinkom
-    try {
-      await sendEmail(
-        email,
-        'Resetovanje lozinke za MusicRoom nalog',
-        `Poštovani ${username},\n\nVaša nova lozinka je: ${newPassword}\n\nMolimo vas da je promenite nakon prijave.\n\nPozdrav,\nMusicRoom tim`
-      );
-      console.log(`Nova lozinka poslana na ${email}`);
-      res.status(200).json({ message: 'Nova lozinka poslana na vaš email!' });
-    } catch (error) {
-      console.error('Greška pri slanju emaila:', error);
-      res.status(500).json({ error: 'Greška pri slanju emaila.' });
-    }
-  } catch (error) {
-    console.error('Greška pri resetovanju lozinke:', error);
-    res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
-});
-
-// Funkcija za generisanje nasumične lozinke
-function generateRandomPassword() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let password = '';
-  for (let i = 0; i < 8; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-}
-
-// Funkcija za slanje emaila
-async function sendEmail(recipientEmail, subject, message) {
-  const nodemailer = require('nodemailer');
-
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: 'alenmahmutovic2@gmail.com', // Tvoj email
-      pass: 'zsvy weot zaek ayzw', // App Password za tvoj email
-    },
-  });
-
-  await transporter.sendMail({
-    from: 'alenmahmutovic2@gmail.com',
-    to: recipientEmail,
-    subject: subject,
-    text: message,
-  });
-}
-
-// Endpoint za promenu lozinke
-app.post('/changePassword', async (req, res) => {
-  const { username, oldPassword, newPassword } = req.body;
-
-  if (!username || !oldPassword || !newPassword) {
-    return res.status(400).json({ error: 'Sva polja su obavezna!' });
-  }
-
-  try {
-    // Proveri da li korisnik postoji sa starom lozinkom
-    const [rows] = await connection.execute(
-      'SELECT * FROM users WHERE username = ? AND password = ?',
-      [username, oldPassword]
-    );
-
-    if (rows.length === 0) {
-      return res.status(401).json({ error: 'Pogrešno korisničko ime ili lozinka!' });
-    }
-
-    // Ažuriraj lozinku
-    await connection.execute(
-      'UPDATE users SET password = ? WHERE username = ?',
-      [newPassword, username]
-    );
-
-    console.log(`Lozinka uspešno promenjena za korisnika: ${username}`);
-    res.status(200).json({ message: 'Lozinka uspešno promenjena!' });
-  } catch (error) {
-    console.error('Greška pri promeni lozinke:', error);
-    res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
-});
-
-// Endpoint za registraciju korisnika
 app.post('/register', async (req, res) => {
-  const { username, password, email } = req.body;
+    const { username, password, email } = req.body;
 
-  if (!username || !password || !email) {
-    return res.status(400).json({ error: 'Sva polja su obavezna!' });
-  }
-
-  try {
-    // Proveri da li korisničko ime već postoji u bazi
-    const [existingUser] = await connection.execute(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
-    );
-
-    if (existingUser.length > 0) {
-      return res.status(400).json({ error: 'Korisničko ime je već zauzeto!' });
+    if (!username || !password || !email) {
+        return res.status(400).json({ error: 'Sva polja su obavezna!' });
     }
 
-    // Dodaj korisnika u tabelu `users`
-    const [result] = await connection.execute(
-      'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
-      [username, password, email]
-    );
+    try {
+        const [existingUser] = await connection.execute(
+            'SELECT * FROM users WHERE username = ?',
+            [username]
+        );
 
-    console.log(`Korisnik "${username}" je uspešno registrovan.`);
-    res.status(201).json({ message: 'Korisnik uspešno registrovan!' });
-  } catch (error) {
-    console.error('Greška pri registraciji korisnika:', error);
-    res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
-});
+        if (existingUser.length > 0) {
+            return res.status(400).json({ error: 'Korisničko ime je već zauzeto!' });
+        }
 
-app.post('/check-username', async (req, res) => {
-  const { username } = req.body;
+        await connection.execute(
+            'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
+            [username, password, email]
+        );
 
-  if (!username) {
-    return res.status(400).json({ error: 'Korisničko ime je obavezno!' });
-  }
-
-  try {
-    // Proveri da li korisničko ime već postoji u bazi
-    const [existingUser] = await connection.execute(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
-    );
-
-    if (existingUser.length > 0) {
-      return res.status(200).json({ isAvailable: false });
+        res.status(201).json({ message: 'Korisnik uspešno registrovan!' });
+    } catch (error) {
+        console.error('Greška pri registraciji:', error);
+        res.status(500).json({ error: 'Greška sa bazom podataka.' });
     }
-
-    return res.status(200).json({ isAvailable: true });
-  } catch (error) {
-    console.error('Greška pri proveri korisničkog imena:', error);
-    return res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
 });
 
-
-
-// Endpoint za prijavu korisnika
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+    const { username, password } = req.body;
 
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Sva polja su obavezna!' });
-  }
-
-  try {
-    // Proveri korisničko ime i lozinku u bazi
-    const [rows] = await connection.execute(
-      'SELECT * FROM users WHERE username = ? AND password = ?',
-      [username, password]
-    );
-
-    if (rows.length > 0) {
-      res.status(200).json({ message: 'Prijava uspešna!' });
-    } else {
-      res.status(401).json({ error: 'Pogrešno korisničko ime ili lozinka!' });
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Sva polja su obavezna!' });
     }
-  } catch (error) {
-    console.error('Greška pri proveri korisnika u bazi:', error);
-    res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
+
+    try {
+        const [rows] = await connection.execute(
+            'SELECT * FROM users WHERE username = ? AND password = ?',
+            [username, password]
+        );
+
+        if (rows.length > 0) {
+            res.status(200).json({ message: 'Prijava uspešna!' });
+        } else {
+            res.status(401).json({ error: 'Pogrešno korisničko ime ili lozinka!' });
+        }
+    } catch (error) {
+        console.error('Greška pri prijavi:', error);
+        res.status(500).json({ error: 'Greška sa bazom podataka.' });
+    }
 });
 
-// Updated createRoom endpoint
 app.post('/createRoom', async (req, res) => {
-  const { room_name, max_users, room_code, username } = req.body;
+    const { room_name, max_users, room_code, username } = req.body;
 
-  if (!room_name || !max_users || !room_code || !username) {
-    return res.status(400).json({ error: 'Sva polja su obavezna!' });
-  }
+    if (!room_name || !max_users || !room_code || !username) {
+        return res.status(400).json({ error: 'Sva polja su obavezna!' });
+    }
 
-  try {
-    // Dodaj sobu u bazu sa početnim brojem korisnika 1 (jer kreator ulazi u sobu)
-    await connection.execute(
-      'INSERT INTO rooms (room_name, max_users, room_code, username, number_users) VALUES (?, ?, ?, ?, 1)',
-      [room_name, max_users, room_code, username]
-    );
+    try {
+        await connection.execute(
+            'INSERT INTO rooms (room_name, max_users, room_code, username, number_users) VALUES (?, ?, ?, ?, 1)',
+            [room_name, max_users, room_code, username]
+        );
 
-    console.log(`✅ Soba "${room_name}" kreirana sa kodom: ${room_code} od strane korisnika: ${username}`);
+        // Inicijalizuj listu korisnika za novu sobu
+        usersInRooms[room_code] = new Set([username]);
 
-    res.status(201).json({ 
-      message: 'Soba uspešno kreirana!', 
-      room_name, 
-      room_code,
-      username 
-    });
-  } catch (error) {
-    console.error('❌ Greška pri kreiranju sobe:', error);
-    res.status(500).json({ error: 'Greška sa bazom podataka.' });
-  }
+        res.status(201).json({
+            message: 'Soba uspešno kreirana!',
+            room_name,
+            room_code,
+            username
+        });
+    } catch (error) {
+        console.error('❌ Greška pri kreiranju sobe:', error);
+        res.status(500).json({ error: 'Greška sa bazom podataka.' });
+    }
 });
 
 wss.on('connection', (ws) => {
@@ -324,17 +179,19 @@ wss.on('connection', (ws) => {
 
         switch (data.type) {
             case 'joinRoom': {
-                const { roomCode } = data;
+                const { roomCode, username } = data;
 
                 if (!rooms[roomCode]) {
-                    rooms[roomCode] = new Map(); // Koristimo Map za lakše praćenje jedinstvenih pjesama
+                    rooms[roomCode] = new Map();
                 }
 
+                if (!usersInRooms[roomCode]) {
+                    usersInRooms[roomCode] = new Set();
+                }
+                usersInRooms[roomCode].add(username);
                 ws.roomCode = roomCode;
+                ws.username = username;
 
-                console.log(`👤 Novi korisnik se pridružio sobi: ${roomCode}`);
-
-                // Konvertuj Map u Array za slanje
                 const songsArray = Array.from(rooms[roomCode].values());
 
                 ws.send(JSON.stringify({
@@ -342,6 +199,15 @@ wss.on('connection', (ws) => {
                     songs: songsArray,
                 }));
 
+                // Obavesti sve korisnike o novom korisniku
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                        client.send(JSON.stringify({
+                            type: 'updateUsers',
+                            users: Array.from(usersInRooms[roomCode])
+                        }));
+                    }
+                });
                 break;
             }
 
@@ -352,39 +218,28 @@ wss.on('connection', (ws) => {
                     rooms[roomCode] = new Map();
                 }
 
-                // Kreiraj jedinstveni ključ za pjesmu
                 const songKey = `${song.title}-${song.artist}`;
 
                 if (rooms[roomCode].has(songKey)) {
-                    // Ako pjesma već postoji, povećaj broj glasova
                     const existingSong = rooms[roomCode].get(songKey);
                     existingSong.votes = (existingSong.votes || 1) + 1;
-                    
-                    // Premjesti pjesmu na početak liste
                     rooms[roomCode].delete(songKey);
                     rooms[roomCode].set(songKey, existingSong);
-                    
-                    console.log(`🎵 Dodan novi glas za pjesmu: "${song.title}" u sobi: ${roomCode}`);
                 } else {
-                    // Ako je nova pjesma, dodaj je sa jednim glasom
                     song.votes = 1;
                     rooms[roomCode].set(songKey, song);
-                    console.log(`🎵 Dodana nova pjesma: "${song.title}" u sobi: ${roomCode}`);
                 }
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Pošalji svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        client.send(JSON.stringify({ 
+                        client.send(JSON.stringify({
                             type: 'updateQueue',
                             songs: updatedSongs
                         }));
                     }
                 });
-
                 break;
             }
 
@@ -393,19 +248,13 @@ wss.on('connection', (ws) => {
 
                 if (!rooms[roomCode]) return;
 
-                // Kreiraj jedinstveni ključ za pesmu
                 const songKey = `${song.title}-${song.artist}`;
-
-                // Ukloni pesmu iz sobe
                 if (rooms[roomCode].has(songKey)) {
                     rooms[roomCode].delete(songKey);
-                    console.log(`🎵 Pesma "${song.title}" je uklonjena iz sobe: ${roomCode}`);
                 }
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
-                // Pošaljite svim korisnicima u sobi ažuriranu listu pesama
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -414,27 +263,19 @@ wss.on('connection', (ws) => {
                         }));
                     }
                 });
-
                 break;
             }
 
             case 'playSong': {
                 const { roomCode, song } = data;
 
-                console.log(`🔊 playSong primljen: "${song.title}" iz sobe: ${roomCode}`);
-
                 if (!rooms[roomCode]) return;
 
-                // Ukloni pjesmu iz Map-e
                 const songKey = `${song.title}-${song.artist}`;
                 rooms[roomCode].delete(songKey);
 
-                // Konvertuj Map u Array za slanje
                 const updatedSongs = Array.from(rooms[roomCode].values());
 
-                console.log(`🗑️ Šaljem updateQueue svim klijentima u sobi: ${roomCode}`);
-
-                // Pošaljite svim korisnicima u toj sobi
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
@@ -442,14 +283,12 @@ wss.on('connection', (ws) => {
                             songs: updatedSongs
                         }));
 
-                        // Pošalji informaciju o trenutno puštenoj pjesmi
                         client.send(JSON.stringify({
                             type: 'currentlyPlaying',
                             song: song
                         }));
                     }
                 });
-
                 break;
             }
 
@@ -458,30 +297,43 @@ wss.on('connection', (ws) => {
 
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                        // Pošalji poruku da nema trenutno puštene pjesme
                         client.send(JSON.stringify({
                             type: 'currentlyPlaying',
                             song: null
                         }));
                     }
                 });
-
                 break;
             }
 
             case 'leaveRoom': {
-                const { roomCode } = data;
+                const { roomCode, username } = data;
+                
+                if (usersInRooms[roomCode]) {
+                    usersInRooms[roomCode].delete(username);
+                    
+                    if (usersInRooms[roomCode].size === 0) {
+                        delete usersInRooms[roomCode];
+                        delete rooms[roomCode];
+                    } else {
+                        wss.clients.forEach((client) => {
+                            if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                                client.send(JSON.stringify({
+                                    type: 'updateUsers',
+                                    users: Array.from(usersInRooms[roomCode])
+                                }));
+                            }
+                        });
+                    }
+                }
 
-                // Smanji broj korisnika u sobi
                 connection.execute(
                     'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
                     [roomCode]
-                ).then(() => {
-                    console.log(`👤 Korisnik napustio sobu: ${roomCode}`);
-                }).catch((error) => {
+                ).catch((error) => {
                     console.error('❌ Greška pri smanjivanju broja korisnika:', error);
                 });
-
+                
                 break;
             }
         }
@@ -489,12 +341,29 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
-
-        // Ne smanjuj broj korisnika ovde, jer to radimo u `leaveRoom` poruci
+        
+        if (ws.roomCode && ws.username) {
+            if (usersInRooms[ws.roomCode]) {
+                usersInRooms[ws.roomCode].delete(ws.username);
+                
+                if (usersInRooms[ws.roomCode].size > 0) {
+                    wss.clients.forEach((client) => {
+                        if (client.readyState === WebSocket.OPEN && client.roomCode === ws.roomCode) {
+                            client.send(JSON.stringify({
+                                type: 'updateUsers',
+                                users: Array.from(usersInRooms[ws.roomCode])
+                            }));
+                        }
+                    });
+                } else {
+                    delete usersInRooms[ws.roomCode];
+                    delete rooms[ws.roomCode];
+                }
+            }
+        }
     });
 });
 
-// Pokreni server
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server pokrenut na ws://0.0.0.0:${PORT}`);
+    console.log(`🚀 Server pokrenut na ws://0.0.0.0:${PORT}`);
 });
