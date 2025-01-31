@@ -483,7 +483,7 @@ wss.on('connection', (ws) => {
 
         // Ne smanjuj broj korisnika ovde, jer to radimo u `leaveRoom` poruci
     });
-});
+
 
 // Pokreni server
 server.listen(PORT, '0.0.0.0', () => {
