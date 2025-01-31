@@ -452,17 +452,7 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
 
-        if (ws.roomCode) {
-            // Smanji broj korisnika u sobi kada korisnik napusti
-            connection.execute(
-                'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
-                [ws.roomCode]
-            ).then(() => {
-                console.log(`👤 Korisnik napustio sobu: ${ws.roomCode}`);
-            }).catch((error) => {
-                console.error('❌ Greška pri smanjivanju broja korisnika:', error);
-            });
-        }
+        // Ne smanjuj broj korisnika ovde, jer to radimo u `leaveRoom` poruci
     });
 });
 
