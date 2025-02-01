@@ -398,7 +398,12 @@ wss.on('connection', (ws) => {
                             type: 'currentlyPlaying',
                             song: song
                         }));
-                    }
+						
+						client.send(JSON.stringify({
+							type: 'songPlayed',
+							songKey: songKey
+						}));
+					}
                 });
                 break;
             }
