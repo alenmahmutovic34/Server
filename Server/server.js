@@ -453,6 +453,7 @@ wss.on('connection', (ws) => {
 			}    
             break;
         }
+	});
 
     ws.on('close', () => {
         console.log('🚪 Klijent se isključio');
