@@ -421,29 +421,32 @@ wss.on('connection', (ws) => {
 
             case 'leaveRoom': {
     const { roomCode, username } = data;
+    console.log(`🔴 Korisnik izlazi: ${username} iz sobe ${roomCode}`);
 
     if (usersInRooms[roomCode]) {
+        console.log(`📋 Pre izlaska: ${Array.from(usersInRooms[roomCode])}`);
+
         if (username && usersInRooms[roomCode].has(username)) {
             usersInRooms[roomCode].delete(username);
         }
 
-        // Ako je soba sada prazna, ukloni je iz memorije
+        console.log(`📋 Posle izlaska: ${Array.from(usersInRooms[roomCode])}`);
+
         if (usersInRooms[roomCode].size === 0) {
             delete usersInRooms[roomCode];
             delete rooms[roomCode];
         }
 
-        // Pošalji svim korisnicima u sobi ažuriranu listu korisnika
         wss.clients.forEach((client) => {
             if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                console.log(`📤 Šaljem ažuriranu listu korisnika: ${Array.from(usersInRooms[roomCode])}`);
                 client.send(JSON.stringify({
                     type: 'updateUsers',
-                    users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "null")
+                    users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "null" && user !== undefined)
                 }));
             }
         });
 
-        // Smanji broj korisnika u bazi podataka
         connection.execute(
             'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
             [roomCode]
@@ -453,6 +456,7 @@ wss.on('connection', (ws) => {
     }
     break;
 }
+
 
 
 
