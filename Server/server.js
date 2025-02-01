@@ -484,9 +484,16 @@ wss.on('connection', (ws) => {
                     delete usersInRooms[ws.roomCode];
                     delete rooms[ws.roomCode];
                 }
-            }
+				
+				connection.execute(
+                'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
+                [ws.roomCode]
+            ).catch((error) => {
+                console.error('❌ Greška pri smanjivanju broja korisnika prilikom zatvaranja:', error);
+            });
         }
-    });
+    }
+});
 });
 
 server.listen(PORT, '0.0.0.0', () => {
