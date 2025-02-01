@@ -284,7 +284,7 @@ app.post('/createRoom', async (req, res) => {
 wss.on('connection', (ws) => {
     console.log('🎧 Novi klijent povezan');
 
-    ws.on('message', (message) => {
+    ws.on('message', async (message) => {
         console.log('📩 SERVER PRIMIO PORUKU:', message);
 
         const data = JSON.parse(message);
@@ -311,14 +311,12 @@ wss.on('connection', (ws) => {
                     songs: songsArray,
                 }));
 
-                // Obavesti sve korisnike o novom korisniku
                 wss.clients.forEach((client) => {
                     if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
                         client.send(JSON.stringify({
-							type: 'updateUsers',
-							users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "None")
-}));
-
+                            type: 'updateUsers',
+                            users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "None")
+                        }));
                     }
                 });
                 break;
@@ -420,80 +418,100 @@ wss.on('connection', (ws) => {
             }
 
             case 'leaveRoom': {
-    const { roomCode, username } = data;
-    console.log(`🔴 Korisnik izlazi: ${username} iz sobe ${roomCode}`);
+                const { roomCode, username } = data;
+                console.log(`🔴 Korisnik izlazi: ${username} iz sobe ${roomCode}`);
 
-    if (usersInRooms[roomCode]) {
-        console.log(`📋 Pre izlaska: ${Array.from(usersInRooms[roomCode])}`);
+                if (usersInRooms[roomCode]) {
+                    try {
+                        // Prvo proverimo trenutno stanje sobe
+                        const [roomCheck] = await connection.execute(
+                            'SELECT number_users FROM rooms WHERE room_code = ?',
+                            [roomCode]
+                        );
 
-        if (username && usersInRooms[roomCode].has(username)) {
-            usersInRooms[roomCode].delete(username);
-        }
+                        if (roomCheck.length > 0 && roomCheck[0].number_users > 0) {
+                            console.log(`📋 Pre izlaska: ${Array.from(usersInRooms[roomCode])}`);
 
-        console.log(`📋 Posle izlaska: ${Array.from(usersInRooms[roomCode])}`);
+                            if (username && usersInRooms[roomCode].has(username)) {
+                                usersInRooms[roomCode].delete(username);
+                                
+                                // Ažuriramo broj korisnika u bazi
+                                await connection.execute(
+                                    'UPDATE rooms SET number_users = GREATEST(number_users - 1, 0) WHERE room_code = ?',
+                                    [roomCode]
+                                );
 
-        if (usersInRooms[roomCode].size === 0) {
-            delete usersInRooms[roomCode];
-            delete rooms[roomCode];
-        }
+                                console.log(`📋 Posle izlaska: ${Array.from(usersInRooms[roomCode])}`);
+                            }
 
-        wss.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
-                console.log(`📤 Šaljem ažuriranu listu korisnika: ${Array.from(usersInRooms[roomCode])}`);
-                client.send(JSON.stringify({
-                    type: 'updateUsers',
-                    users: Array.from(usersInRooms[roomCode]).filter(user => user !== null && user !== "null" && user !== undefined)
-                }));
+                            if (usersInRooms[roomCode].size === 0) {
+                                delete usersInRooms[roomCode];
+                                delete rooms[roomCode];
+                                console.log(`🧹 Soba obrisana: ${roomCode}`);
+                            } else {
+                                // Obaveštavamo preostale korisnike
+                                wss.clients.forEach((client) => {
+                                    if (client.readyState === WebSocket.OPEN && client.roomCode === roomCode) {
+                                        client.send(JSON.stringify({
+                                            type: 'updateUsers',
+                                            users: Array.from(usersInRooms[roomCode])
+                                                .filter(user => user !== null && user !== "null" && user !== undefined)
+                                        }));
+                                    }
+                                });
+                            }
+                        }
+                    } catch (error) {
+                        console.error('❌ Greška pri napuštanju sobe:', error);
+                    }
+                }
+                break;
             }
-        });
-
-        connection.execute(
-            'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
-            [roomCode]
-        ).catch((error) => {
-            console.error('❌ Greška pri smanjivanju broja korisnika:', error);
-        });
-    }
-    break;
-}
-
-
-
-
-                
         }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
         console.log('🚪 Klijent se isključio');
         
         if (ws.roomCode && ws.username) {
-            if (usersInRooms[ws.roomCode]) {
-                usersInRooms[ws.roomCode].delete(ws.username);
-                
-                if (usersInRooms[ws.roomCode].size > 0) {
-                    wss.clients.forEach((client) => {
-                        if (client.readyState === WebSocket.OPEN && client.roomCode === ws.roomCode) {
-                            client.send(JSON.stringify({
-                                type: 'updateUsers',
-                                users: Array.from(usersInRooms[ws.roomCode])
-                            }));
+            try {
+                const [roomCheck] = await connection.execute(
+                    'SELECT number_users FROM rooms WHERE room_code = ?',
+                    [ws.roomCode]
+                );
+
+                if (roomCheck.length > 0 && roomCheck[0].number_users > 0) {
+                    if (usersInRooms[ws.roomCode]) {
+                        usersInRooms[ws.roomCode].delete(ws.username);
+                        
+                        // Ažuriramo broj korisnika u bazi
+                        await connection.execute(
+                            'UPDATE rooms SET number_users = GREATEST(number_users - 1, 0) WHERE room_code = ?',
+                            [ws.roomCode]
+                        );
+
+                        if (usersInRooms[ws.roomCode].size > 0) {
+                            wss.clients.forEach((client) => {
+                                if (client.readyState === WebSocket.OPEN && client.roomCode === ws.roomCode) {
+                                    client.send(JSON.stringify({
+                                        type: 'updateUsers',
+                                        users: Array.from(usersInRooms[ws.roomCode])
+                                            .filter(user => user !== null && user !== "null" && user !== undefined)
+                                    }));
+                                }
+                            });
+                        } else {
+                            delete usersInRooms[ws.roomCode];
+                            delete rooms[ws.roomCode];
+                            console.log(`🧹 Soba obrisana nakon poslednjeg korisnika: ${ws.roomCode}`);
                         }
-                    });
-                } else {
-                    delete usersInRooms[ws.roomCode];
-                    delete rooms[ws.roomCode];
+                    }
                 }
-				
-				connection.execute(
-                'UPDATE rooms SET number_users = number_users - 1 WHERE room_code = ?',
-                [ws.roomCode]
-            ).catch((error) => {
-                console.error('❌ Greška pri smanjivanju broja korisnika prilikom zatvaranja:', error);
-            });
+            } catch (error) {
+                console.error('❌ Greška pri zatvaranju konekcije:', error);
+            }
         }
-    }
-});
+    });
 });
 
 server.listen(PORT, '0.0.0.0', () => {
