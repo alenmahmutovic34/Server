@@ -372,6 +372,11 @@ wss.on('connection', (ws) => {
                             type: 'updateQueue',
                             songs: updatedSongs
                         }));
+						
+						client.send(JSON.stringify({
+							type: 'songRemoved',
+							songKey: songKey
+						}));
                     }
                 });
                 break;
